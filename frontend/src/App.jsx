@@ -9,7 +9,7 @@ import { connectSocket, disconnectSocket } from "./services/socket";
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [phone, setPhone] = useState(null);
-  const [devOtp, setDevOtp] = useState(null); // only set in dev mode
+  const [confirmation, setConfirmation] = useState(null); // Firebase confirmation object
   const [loading, setLoading] = useState(true);
   const [hasUsername, setHasUsername] = useState(false);
 
@@ -22,9 +22,7 @@ export default function App() {
       } catch {
         localStorage.removeItem("token");
         setToken(null);
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     }
     checkUser();
   }, [token]);
@@ -33,9 +31,9 @@ export default function App() {
     if (token && hasUsername) connectSocket();
   }, [token, hasUsername]);
 
-  function handleSetPhone(phoneValue, otp) {
+  function handleConfirmation(phoneValue, confirmationResult) {
     setPhone(phoneValue);
-    setDevOtp(otp || null);
+    setConfirmation(confirmationResult);
   }
 
   function handleLogin(newToken) {
@@ -49,16 +47,16 @@ export default function App() {
     setToken(null);
     setHasUsername(false);
     setPhone(null);
-    setDevOtp(null);
+    setConfirmation(null);
   }
 
-  if (loading) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (loading) return <div style={{padding:40,color:"var(--text-secondary)"}}>Loading…</div>;
 
   if (!token && !phone)
-    return <Login setPhone={handleSetPhone} />;
+    return <Login onConfirmation={handleConfirmation} />;
 
   if (!token && phone)
-    return <VerifyOTP phone={phone} devOtp={devOtp} onLogin={handleLogin} />;
+    return <VerifyOTP phone={phone} confirmation={confirmation} onLogin={handleLogin} />;
 
   if (!hasUsername)
     return <SetUsername onDone={() => setHasUsername(true)} />;

@@ -1,20 +1,31 @@
-import { useState } from "react";
-import api from "../services/api";
+import { useState, useRef } from "react";
+import { auth } from "../firebase";
+import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 
-export default function Login({ setPhone }) {
-  const [phone, setPhoneInput] = useState("");
+export default function Login({ onConfirmation }) {
+  const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const recaptchaRef = useRef(null);
 
-  async function requestOTP() {
+  async function sendOTP() {
     const trimmed = phone.trim();
     if (!trimmed) { setError("Please enter your phone number"); return; }
+    if (!trimmed.startsWith("+")) { setError("Include country code e.g. +91 98765 43210"); return; }
     setError(""); setLoading(true);
     try {
-      const res = await api.post("/auth/request-otp", { phone: trimmed });
-      setPhone(trimmed, res.data.otp || null);
+      if (!window.recaptchaVerifier) {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaRef.current, { size: "invisible" });
+        await window.recaptchaVerifier.render();
+      }
+      const confirmation = await signInWithPhoneNumber(auth, trimmed, window.recaptchaVerifier);
+      onConfirmation(trimmed, confirmation);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to send OTP. Try again.");
+      console.error(err);
+      if (window.recaptchaVerifier) { window.recaptchaVerifier.clear(); window.recaptchaVerifier = null; }
+      if (err.code === "auth/invalid-phone-number") setError("Invalid number. Include country code e.g. +91...");
+      else if (err.code === "auth/too-many-requests") setError("Too many attempts. Try again later.");
+      else setError(err.message || "Failed to send OTP. Try again.");
     } finally { setLoading(false); }
   }
 
@@ -30,27 +41,18 @@ export default function Login({ setPhone }) {
         </div>
         <h1 style={s.title}>R-Chat</h1>
         <p style={s.subtitle}>Enter your phone number to continue</p>
-
         <div style={s.inputWrap}>
-          <span style={s.inputIcon}>📱</span>
-          <input
-            style={s.input}
-            placeholder="+91 98765 43210"
-            value={phone}
-            onChange={e => setPhoneInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && requestOTP()}
-            type="tel"
-            autoFocus
-          />
+          <span style={s.icon}>📱</span>
+          <input style={s.input} placeholder="+91 98765 43210" value={phone}
+            onChange={e => setPhone(e.target.value)} onKeyDown={e => e.key==="Enter" && sendOTP()}
+            type="tel" autoFocus />
         </div>
-
         {error && <p style={s.error}>{error}</p>}
-
-        <button style={{ ...s.btn, opacity: loading ? 0.7 : 1 }} onClick={requestOTP} disabled={loading}>
-          {loading ? <span style={s.spinner} /> : "Continue"}
+        <div ref={recaptchaRef} />
+        <button style={{...s.btn, opacity: loading ? 0.7 : 1}} onClick={sendOTP} disabled={loading}>
+          {loading ? <><span style={s.spinner}/> Sending…</> : "Continue"}
         </button>
-
-        <p style={s.terms}>By continuing, you agree to our Terms of Service</p>
+        <p style={s.terms}>Verified by Firebase · No registration needed</p>
       </div>
     </div>
   );
@@ -63,10 +65,10 @@ const s = {
   title: { fontSize:28, fontWeight:700, color:"var(--text-primary)", marginBottom:6 },
   subtitle: { fontSize:14, color:"var(--text-secondary)", marginBottom:32 },
   inputWrap: { display:"flex", alignItems:"center", gap:10, background:"var(--bg-search)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", padding:"0 16px", marginBottom:12 },
-  inputIcon: { fontSize:16, flexShrink:0 },
+  icon: { fontSize:16, flexShrink:0 },
   input: { flex:1, padding:"14px 0", fontSize:15, color:"var(--text-primary)", background:"transparent" },
   error: { color:"#f87171", fontSize:13, marginBottom:12, textAlign:"left" },
-  btn: { width:"100%", padding:"14px", fontSize:15, fontWeight:600, background:"var(--accent)", color:"#fff", borderRadius:"var(--radius-md)", transition:"opacity .2s", display:"flex", alignItems:"center", justifyContent:"center", gap:8 },
-  spinner: { width:18, height:18, border:"2px solid rgba(255,255,255,.3)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin .7s linear infinite" },
-  terms: { marginTop:20, fontSize:12, color:"var(--text-muted)", lineHeight:1.6 },
+  btn: { width:"100%", padding:"14px", fontSize:15, fontWeight:600, background:"var(--accent)", color:"#fff", borderRadius:"var(--radius-md)", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 },
+  spinner: { width:16, height:16, border:"2px solid rgba(255,255,255,.3)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin .7s linear infinite", flexShrink:0 },
+  terms: { marginTop:20, fontSize:12, color:"var(--text-muted)" },
 };
