@@ -27,7 +27,7 @@ const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 
 /* ─────────────────────────────
-   CORS
+   Allowed Origins
 ───────────────────────────── */
 
 const ALLOWED_ORIGINS = [
@@ -36,12 +36,8 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5174",
 ];
 
-/*
-Allow Vercel preview deployments automatically
-example:
-chatty-phi-ten-git-main.vercel.app
-*/
-const isAllowedOrigin = (origin) => {
+/* Allow Vercel preview deployments */
+function isAllowedOrigin(origin) {
 
   if (!origin) return true;
 
@@ -51,9 +47,14 @@ const isAllowedOrigin = (origin) => {
 
   return false;
 
-};
+}
+
+/* ─────────────────────────────
+   CORS
+───────────────────────────── */
 
 const corsOptions = {
+
   origin: (origin, callback) => {
 
     if (isAllowedOrigin(origin)) {
@@ -70,10 +71,13 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 
   credentials: true,
+
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+
+/* Handle all preflight requests safely */
+app.options(/.*/, cors(corsOptions));
 
 /* ─────────────────────────────
    Middleware
@@ -92,16 +96,18 @@ app.use("/conversations", conversationRoutes);
 app.use("/messages", messageRoutes);
 app.use("/groups", groupRoutes);
 
+/* Health check */
 app.get("/", (_req, res) => {
   res.json({ status: "Chatty API running" });
 });
 
+/* 404 handler */
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
 /* ─────────────────────────────
-   Socket.IO
+   Socket.IO Setup
 ───────────────────────────── */
 
 const io = new Server(server, {
@@ -109,12 +115,14 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
+/* Socket authentication */
 io.use(socketAuthMiddleware);
 
+/* Online users map */
 const onlineUsers = new Map();
 
 /* ─────────────────────────────
-   Online Users Helpers
+   Online User Helpers
 ───────────────────────────── */
 
 function addOnline(userId, socketId) {
@@ -156,7 +164,6 @@ io.on("connection", (socket) => {
   console.log(`Socket connected: ${socket.id} (user ${userId})`);
 
   addOnline(userId, socket.id);
-
   broadcastOnlineUsers();
 
   socket.on("join_conversation", (conversationId) => {
@@ -179,7 +186,10 @@ io.on("connection", (socket) => {
 
     socket
       .to(data.conversation_id)
-      .emit("receive_message", { ...data, sender_id: userId });
+      .emit("receive_message", {
+        ...data,
+        sender_id: userId
+      });
 
   });
 
@@ -216,7 +226,6 @@ io.on("connection", (socket) => {
     console.log(`Socket disconnected: ${socket.id} (user ${userId})`);
 
     removeOnline(userId, socket.id);
-
     broadcastOnlineUsers();
 
   });
