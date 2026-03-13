@@ -8,122 +8,65 @@ export default function SetUsername({ onDone }) {
   const [error, setError] = useState("");
 
   async function save() {
-    const trimmedUser = username.trim().toLowerCase();
-    const trimmedDisplay = displayName.trim();
-
-    if (!trimmedUser) {
-      setError("Username is required");
-      return;
-    }
-
-    if (trimmedUser.length < 3) {
-      setError("Username must be at least 3 characters");
-      return;
-    }
-
-    if (!/^[a-z0-9_]+$/.test(trimmedUser)) {
-      setError("Username may only contain letters, numbers, and underscores");
-      return;
-    }
-
-    setError("");
-    setLoading(true);
-
+    const u = username.trim().toLowerCase();
+    if (!u) { setError("Username is required"); return; }
+    if (u.length < 3) { setError("At least 3 characters"); return; }
+    if (!/^[a-z0-9_]+$/.test(u)) { setError("Letters, numbers and underscores only"); return; }
+    setError(""); setLoading(true);
     try {
-      await api.post("/users/username", {
-        username: trimmedUser,
-        display_name: trimmedDisplay || null,
-      });
+      await api.post("/users/username", { username: u, display_name: displayName.trim() || null });
       onDone();
     } catch (err) {
-      const msg = err.response?.data?.error || "Failed to save profile. Please try again.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === "Enter") save();
+      setError(err.response?.data?.error || "Failed to save. Try again.");
+    } finally { setLoading(false); }
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>Create your profile</h2>
-        <p style={styles.subtitle}>Choose a username to get started</p>
+    <div style={s.page}>
+      <div style={s.card}>
+        <div style={s.avatar}>
+          {displayName.trim() ? displayName.trim()[0].toUpperCase() : "?"}
+        </div>
+        <h1 style={s.title}>Set up your profile</h1>
+        <p style={s.subtitle}>Choose a username so people can find you</p>
 
-        <label style={styles.label}>Username *</label>
-        <input
-          style={styles.input}
-          placeholder="e.g. john_doe"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyDown={handleKeyDown}
-          autoFocus
-        />
+        <div style={s.field}>
+          <label style={s.label}>Username</label>
+          <div style={s.inputWrap}>
+            <span style={s.prefix}>@</span>
+            <input style={s.input} placeholder="your_username" value={username}
+              onChange={e => setUsername(e.target.value)} onKeyDown={e => e.key==="Enter" && save()} autoFocus />
+          </div>
+        </div>
 
-        <label style={styles.label}>Display name (optional)</label>
-        <input
-          style={styles.input}
-          placeholder="e.g. John Doe"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
+        <div style={s.field}>
+          <label style={s.label}>Display name <span style={{color:"var(--text-muted)"}}>— optional</span></label>
+          <input style={s.inputPlain} placeholder="Your Name" value={displayName}
+            onChange={e => setDisplayName(e.target.value)} onKeyDown={e => e.key==="Enter" && save()} />
+        </div>
 
-        {error && <p style={styles.error}>{error}</p>}
+        {error && <p style={s.error}>{error}</p>}
 
-        <button
-          style={{ ...styles.button, opacity: loading ? 0.7 : 1 }}
-          onClick={save}
-          disabled={loading}
-        >
-          {loading ? "Saving…" : "Continue"}
+        <button style={{...s.btn, opacity:loading?.7:1}} onClick={save} disabled={loading}>
+          {loading ? "Saving…" : "Continue →"}
         </button>
       </div>
     </div>
   );
 }
 
-const styles = {
-  container: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",
-    background: "#f5f5f5",
-  },
-  card: {
-    background: "#fff",
-    borderRadius: 12,
-    padding: "40px 36px",
-    width: 380,
-    boxShadow: "0 2px 16px rgba(0,0,0,0.1)",
-  },
-  title: { margin: "0 0 6px", fontSize: 22, fontWeight: 600 },
-  subtitle: { margin: "0 0 20px", color: "#666", fontSize: 14 },
-  label: { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#333" },
-  input: {
-    width: "100%",
-    padding: "10px 12px",
-    fontSize: 15,
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    boxSizing: "border-box",
-    outline: "none",
-    marginBottom: 14,
-  },
-  error: { color: "#c0392b", fontSize: 13, margin: "0 0 10px" },
-  button: {
-    width: "100%",
-    padding: "10px",
-    fontSize: 15,
-    fontWeight: 600,
-    background: "#2563eb",
-    color: "#fff",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
+const s = {
+  page: { height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"var(--bg-app)" },
+  card: { width:400, padding:"48px 40px", background:"var(--bg-sidebar)", borderRadius:20, border:"1px solid var(--border)" },
+  avatar: { width:72, height:72, borderRadius:"50%", background:"linear-gradient(135deg,#25d366,#128c7e)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, fontWeight:700, color:"#fff", marginBottom:20 },
+  title: { fontSize:24, fontWeight:700, marginBottom:6 },
+  subtitle: { fontSize:14, color:"var(--text-secondary)", marginBottom:28 },
+  field: { marginBottom:18 },
+  label: { display:"block", fontSize:12, fontWeight:600, color:"var(--text-secondary)", marginBottom:6, textTransform:"uppercase", letterSpacing:".05em" },
+  inputWrap: { display:"flex", alignItems:"center", background:"var(--bg-search)", border:"1px solid var(--border)", borderRadius:"var(--radius-sm)", padding:"0 14px" },
+  prefix: { color:"var(--accent)", fontWeight:700, fontSize:16, marginRight:4 },
+  input: { flex:1, padding:"13px 0", fontSize:15, color:"var(--text-primary)", background:"transparent" },
+  inputPlain: { width:"100%", padding:"13px 14px", fontSize:15, color:"var(--text-primary)", background:"var(--bg-search)", border:"1px solid var(--border)", borderRadius:"var(--radius-sm)" },
+  error: { color:"#f87171", fontSize:13, marginBottom:12 },
+  btn: { width:"100%", padding:"14px", fontSize:15, fontWeight:600, background:"var(--accent)", color:"#fff", borderRadius:"var(--radius-md)", marginTop:8 },
 };

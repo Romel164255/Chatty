@@ -2,217 +2,162 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import api from "../services/api";
 import { getSocket } from "../services/socket";
 
-// Decode user id from JWT stored in localStorage (without a library)
-function getMyUserId() {
-  try {
-    const token = localStorage.getItem("token");
-    if (!token) return null;
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.id;
-  } catch {
-    return null;
-  }
+function getMyId() {
+  try { return JSON.parse(atob(localStorage.getItem("token").split(".")[1])).id; } catch { return null; }
+}
+
+function timeFmt(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+}
+
+function StatusTick({ status }) {
+  if (status === "read") return <span style={{color:"#53bdeb",fontSize:12}}>✓✓</span>;
+  if (status === "delivered") return <span style={{color:"#aaa",fontSize:12}}>✓✓</span>;
+  return <span style={{color:"#aaa",fontSize:12}}>✓</span>;
 }
 
 export default function MessageList({ conversationId }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [typingUsers, setTypingUsers] = useState([]);
+  const [typing, setTyping] = useState(false);
   const bottomRef = useRef(null);
-  const myId = getMyUserId();
+  const myId = getMyId();
 
-  // Scroll to bottom whenever messages change
-  function scrollToBottom() {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }
-
-  // Load initial messages from REST API
-  const loadMessages = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const res = await api.get(`/messages/${conversationId}`);
-      // API already returns oldest-first after the fix
-      setMessages(res.data);
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-    } finally {
-      setLoading(false);
-    }
+    try { const r = await api.get(`/messages/${conversationId}`); setMessages(r.data); }
+    catch {} finally { setLoading(false); }
   }, [conversationId]);
 
-  useEffect(() => {
-    setMessages([]);
-    setTypingUsers([]);
-    loadMessages();
-  }, [loadMessages]);
+  useEffect(() => { setMessages([]); setTyping(false); load(); }, [load]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, typing]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Socket: join room and listen for real-time events
   useEffect(() => {
     const socket = getSocket();
     if (!socket || !conversationId) return;
 
     socket.emit("join_conversation", conversationId);
 
-    // receive_message comes from OTHER users only (server uses socket.to())
-    // so no duplicate risk for the sender
-    function handleReceiveMessage(data) {
-      if (data.conversation_id === conversationId) {
-        setMessages((prev) => {
-          // Guard against duplicates (e.g. re-subscription)
-          if (prev.some((m) => m.id === data.id)) return prev;
-          return [...prev, data];
-        });
-      }
+    function onMsg(data) {
+      if (data.conversation_id !== conversationId) return;
+      setMessages(prev => prev.some(m=>m.id===data.id) ? prev : [...prev, data]);
     }
-
-    function handleTyping({ userId, isTyping }) {
-      if (userId === myId) return;
-      setTypingUsers((prev) =>
-        isTyping
-          ? prev.includes(userId) ? prev : [...prev, userId]
-          : prev.filter((id) => id !== userId)
-      );
-    }
-
-    // Local event for messages sent by THIS user (avoids duplicate from socket relay)
-    function handleSentMessage(e) {
+    function onSent(e) {
       const data = e.detail;
-      if (data.conversation_id === conversationId) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.id)) return prev;
-          return [...prev, data];
-        });
-      }
+      if (data.conversation_id !== conversationId) return;
+      setMessages(prev => prev.some(m=>m.id===data.id) ? prev : [...prev, data]);
+    }
+    function onTyping({ userId, isTyping }) {
+      if (userId !== myId) setTyping(isTyping);
     }
 
-    socket.on("receive_message", handleReceiveMessage);
-    socket.on("user_typing", handleTyping);
-    window.addEventListener("chatty:message_sent", handleSentMessage);
+    socket.on("receive_message", onMsg);
+    socket.on("user_typing", onTyping);
+    window.addEventListener("chatty:message_sent", onSent);
 
     return () => {
-      socket.off("receive_message", handleReceiveMessage);
-      socket.off("user_typing", handleTyping);
-      window.removeEventListener("chatty:message_sent", handleSentMessage);
+      socket.off("receive_message", onMsg);
+      socket.off("user_typing", onTyping);
+      window.removeEventListener("chatty:message_sent", onSent);
       socket.emit("leave_conversation", conversationId);
     };
   }, [conversationId, myId]);
 
-  function formatTime(isoString) {
-    if (!isoString) return "";
-    return new Date(isoString).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
+  if (loading) return (
+    <div style={s.loading}>
+      <div style={s.loadingDots}><span/><span/><span/></div>
+    </div>
+  );
 
-  if (loading) {
-    return <div style={styles.loading}>Loading messages…</div>;
-  }
+  // Group messages by date
+  const groups = [];
+  let lastDate = null;
+  messages.forEach(m => {
+    const d = new Date(m.created_at).toDateString();
+    if (d !== lastDate) { groups.push({ type:"date", label: formatDateLabel(m.created_at) }); lastDate = d; }
+    groups.push({ type:"msg", ...m });
+  });
 
   return (
-    <div style={styles.list}>
-      {messages.length === 0 && (
-        <div style={styles.empty}>No messages yet. Say hello!</div>
+    <div style={s.list}>
+      {messages.length===0 && (
+        <div style={s.empty}>
+          <div style={s.emptyBubble}>👋 Say hello!</div>
+        </div>
       )}
 
-      {messages.map((m) => {
-        const isMine = m.sender_id === myId;
+      {groups.map((item, i) => {
+        if (item.type === "date") return (
+          <div key={`d-${i}`} style={s.dateDivider}>
+            <span style={s.dateLabel}>{item.label}</span>
+          </div>
+        );
+
+        const mine = item.sender_id === myId;
+        const prevMsg = groups[i-1];
+        const nextMsg = groups[i+1];
+        const isFirst = !prevMsg || prevMsg.type==="date" || prevMsg.sender_id!==item.sender_id;
+        const isLast = !nextMsg || nextMsg.type==="date" || nextMsg.sender_id!==item.sender_id;
+
         return (
-          <div
-            key={m.id}
-            style={{
-              ...styles.row,
-              justifyContent: isMine ? "flex-end" : "flex-start",
-            }}
-          >
-            <div
-              style={{
-                ...styles.bubble,
-                background: isMine ? "#2563eb" : "#fff",
-                color: isMine ? "#fff" : "#111",
-                borderBottomRightRadius: isMine ? 2 : 12,
-                borderBottomLeftRadius: isMine ? 12 : 2,
-              }}
-            >
-              <div style={styles.content}>{m.content}</div>
-              <div
-                style={{
-                  ...styles.time,
-                  color: isMine ? "rgba(255,255,255,0.7)" : "#9ca3af",
-                }}
-              >
-                {formatTime(m.created_at)}
-                {isMine && (
-                  <span style={{ marginLeft: 4 }}>
-                    {m.status === "read" ? "✓✓" : m.status === "delivered" ? "✓✓" : "✓"}
-                  </span>
-                )}
+          <div key={item.id} style={{ ...s.msgRow, justifyContent: mine?"flex-end":"flex-start", marginBottom: isLast ? 6 : 2 }}>
+            <div style={{
+              ...s.bubble,
+              background: mine ? "var(--bg-bubble-me)" : "var(--bg-bubble-them)",
+              borderRadius: mine
+                ? `var(--radius-bubble) ${isFirst?"4px":"var(--radius-bubble)"} var(--radius-bubble) var(--radius-bubble)`
+                : `${isFirst?"4px":"var(--radius-bubble)"} var(--radius-bubble) var(--radius-bubble) var(--radius-bubble)`,
+              maxWidth: "65%",
+            }}>
+              <p style={s.text}>{item.content}</p>
+              <div style={s.meta}>
+                <span style={s.time}>{timeFmt(item.created_at)}</span>
+                {mine && <StatusTick status={item.status}/>}
               </div>
             </div>
           </div>
         );
       })}
 
-      {typingUsers.length > 0 && (
-        <div style={{ ...styles.row, justifyContent: "flex-start" }}>
-          <div style={{ ...styles.bubble, background: "#e5e7eb", padding: "8px 14px" }}>
-            <span style={styles.typingDots}>
-              <span>•</span><span>•</span><span>•</span>
-            </span>
+      {typing && (
+        <div style={{...s.msgRow, justifyContent:"flex-start", marginBottom:6}}>
+          <div style={{...s.bubble, background:"var(--bg-bubble-them)", padding:"10px 14px"}}>
+            <div style={s.typingDots}>
+              <span style={{...s.typingDot, animationDelay:"0s"}}/>
+              <span style={{...s.typingDot, animationDelay:".2s"}}/>
+              <span style={{...s.typingDot, animationDelay:".4s"}}/>
+            </div>
           </div>
         </div>
       )}
 
-      <div ref={bottomRef} />
+      <div ref={bottomRef}/>
     </div>
   );
 }
 
-const styles = {
-  list: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "16px 12px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    background: "#f0f2f5",
-  },
-  loading: {
-    flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#9ca3af",
-    fontSize: 14,
-  },
-  empty: {
-    textAlign: "center",
-    color: "#9ca3af",
-    fontSize: 14,
-    marginTop: 40,
-  },
-  row: {
-    display: "flex",
-    marginBottom: 2,
-  },
-  bubble: {
-    maxWidth: "65%",
-    padding: "8px 12px 4px",
-    borderRadius: 12,
-    boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
-  },
-  content: { fontSize: 14, lineHeight: 1.5, wordBreak: "break-word" },
-  time: { fontSize: 10, textAlign: "right", marginTop: 2 },
-  typingDots: {
-    display: "inline-flex",
-    gap: 3,
-    fontSize: 18,
-    lineHeight: 1,
-    color: "#6b7280",
-  },
+function formatDateLabel(iso) {
+  const d = new Date(iso), now = new Date();
+  if (d.toDateString()===now.toDateString()) return "Today";
+  const yest = new Date(now); yest.setDate(yest.getDate()-1);
+  if (d.toDateString()===yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([],{month:"long",day:"numeric",year:"numeric"});
+}
+
+const s = {
+  list: { flex:1, overflowY:"auto", padding:"12px 16px", display:"flex", flexDirection:"column", gap:0 },
+  loading: { flex:1, display:"flex", alignItems:"center", justifyContent:"center" },
+  loadingDots: { display:"flex", gap:6 },
+  empty: { flex:1, display:"flex", alignItems:"center", justifyContent:"center", paddingTop:60 },
+  emptyBubble: { background:"var(--bg-bubble-them)", padding:"10px 18px", borderRadius:20, fontSize:14, color:"var(--text-secondary)" },
+  dateDivider: { display:"flex", justifyContent:"center", margin:"12px 0" },
+  dateLabel: { fontSize:12, color:"var(--text-muted)", background:"#1a2c3a", padding:"3px 12px", borderRadius:10 },
+  msgRow: { display:"flex", width:"100%" },
+  bubble: { padding:"7px 10px 4px", wordBreak:"break-word" },
+  text: { fontSize:14.5, lineHeight:1.5, color:"var(--text-primary)" },
+  meta: { display:"flex", alignItems:"center", justifyContent:"flex-end", gap:4, marginTop:2 },
+  time: { fontSize:11, color:"var(--text-muted)" },
+  typingDots: { display:"flex", gap:4, alignItems:"center", height:16 },
+  typingDot: { width:7, height:7, borderRadius:"50%", background:"var(--text-secondary)", animation:"bounce .8s infinite ease-in-out" },
 };

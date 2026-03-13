@@ -1,142 +1,75 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import api from "../services/api";
 
-export default function SearchUsers({ reload, setActiveConversation }) {
-  const [query, setQuery] = useState("");
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef(null);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClick(e) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  async function search(value) {
-    setQuery(value);
-    if (!value.trim() || value.trim().length < 2) {
-      setUsers([]);
-      setOpen(false);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await api.get(`/users/search?username=${encodeURIComponent(value.trim())}`);
-      setUsers(res.data);
-      setOpen(true);
-    } catch (err) {
-      console.error("Search failed:", err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function startChat(userId) {
-    try {
-      const res = await api.post("/conversations", { user_id: userId });
-      await reload();
-      setActiveConversation(res.data.conversation_id);
-      setUsers([]);
-      setQuery("");
-      setOpen(false);
-    } catch (err) {
-      console.error("Failed to start conversation:", err);
-    }
-  }
-
+function Avatar({ name, size=40 }) {
+  const initials = (name||"?").slice(0,2).toUpperCase();
+  const hue = [...(name||"")].reduce((a,c)=>a+c.charCodeAt(0),0) % 360;
   return (
-    <div ref={wrapperRef} style={styles.wrapper}>
-      <input
-        style={styles.input}
-        placeholder="Search users…"
-        value={query}
-        onChange={(e) => search(e.target.value)}
-      />
-
-      {open && (
-        <div style={styles.dropdown}>
-          {loading && <div style={styles.item}>Searching…</div>}
-
-          {!loading && users.length === 0 && (
-            <div style={styles.item}>No users found</div>
-          )}
-
-          {users.map((u) => (
-            <div
-              key={u.id}
-              style={styles.userRow}
-              onClick={() => startChat(u.id)}
-            >
-              <div style={styles.avatar}>
-                {(u.display_name || u.username)[0].toUpperCase()}
-              </div>
-              <div>
-                <div style={styles.userName}>{u.display_name || u.username}</div>
-                <div style={styles.userHandle}>@{u.username}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+    <div style={{width:size,height:size,borderRadius:"50%",background:`hsl(${hue},45%,32%)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.36,fontWeight:700,color:`hsl(${hue},60%,80%)`,flexShrink:0}}>
+      {initials}
     </div>
   );
 }
 
-const styles = {
-  wrapper: { position: "relative", padding: "10px 12px", borderBottom: "1px solid #e5e7eb" },
-  input: {
-    width: "100%",
-    padding: "8px 12px",
-    fontSize: 13,
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    boxSizing: "border-box",
-    outline: "none",
-    background: "#f9fafb",
-  },
-  dropdown: {
-    position: "absolute",
-    top: "100%",
-    left: 12,
-    right: 12,
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 8,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-    zIndex: 100,
-    maxHeight: 220,
-    overflowY: "auto",
-  },
-  item: { padding: "10px 14px", fontSize: 13, color: "#888" },
-  userRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "8px 12px",
-    cursor: "pointer",
-    borderBottom: "1px solid #f3f4f6",
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: "50%",
-    background: "#2563eb",
-    color: "#fff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: 700,
-    fontSize: 14,
-    flexShrink: 0,
-  },
-  userName: { fontSize: 13, fontWeight: 600, color: "#111" },
-  userHandle: { fontSize: 12, color: "#9ca3af" },
+export default function SearchUsers({ reload, onSelect, onClose }) {
+  const [query, setQuery] = useState("");
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  async function search(v) {
+    setQuery(v);
+    if (!v.trim() || v.trim().length < 2) { setUsers([]); return; }
+    setLoading(true);
+    try {
+      const r = await api.get(`/users/search?username=${encodeURIComponent(v.trim())}`);
+      setUsers(r.data);
+    } catch {}
+    finally { setLoading(false); }
+  }
+
+  async function startChat(u) {
+    try {
+      const r = await api.post("/conversations", { user_id: u.id });
+      await reload();
+      onSelect(r.data.conversation_id, u.display_name || u.username);
+    } catch {}
+  }
+
+  return (
+    <div style={s.wrap}>
+      <div style={s.bar}>
+        <button style={s.back} onClick={onClose}>
+          <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg>
+        </button>
+        <input style={s.input} placeholder="Search by username…" value={query}
+          onChange={e=>search(e.target.value)} autoFocus />
+      </div>
+
+      <div style={s.results}>
+        {loading && <div style={s.hint}>Searching…</div>}
+        {!loading && query.length>=2 && users.length===0 && <div style={s.hint}>No users found</div>}
+        {users.map(u => (
+          <div key={u.id} style={s.row} onClick={()=>startChat(u)}>
+            <Avatar name={u.display_name||u.username}/>
+            <div>
+              <div style={s.name}>{u.display_name||u.username}</div>
+              <div style={s.handle}>@{u.username}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const s = {
+  wrap: { display:"flex", flexDirection:"column", flex:1, background:"var(--bg-sidebar)" },
+  bar: { display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:"var(--bg-header)", borderBottom:"1px solid var(--border)" },
+  back: { width:34, height:34, borderRadius:"50%", background:"none", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--accent)", flexShrink:0 },
+  input: { flex:1, padding:"8px 0", fontSize:15, color:"var(--text-primary)", background:"transparent" },
+  results: { overflowY:"auto", flex:1 },
+  hint: { padding:"20px 16px", fontSize:13, color:"var(--text-muted)" },
+  row: { display:"flex", alignItems:"center", gap:12, padding:"12px 16px", cursor:"pointer", borderBottom:"1px solid #ffffff08", transition:"background .1s" },
+  name: { fontSize:14, fontWeight:600, color:"var(--text-primary)" },
+  handle: { fontSize:12, color:"var(--text-secondary)", marginTop:2 },
 };

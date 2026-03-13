@@ -2,155 +2,107 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import api from "../services/api";
 import { getSocket } from "../services/socket";
 
-const TYPING_DEBOUNCE_MS = 1000; // stop-typing delay
-
 export default function MessageInput({ conversationId }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const isTypingRef = useRef(false);
-  const typingTimerRef = useRef(null);
+  const timerRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  // Cleanup typing state when conversation changes
   useEffect(() => {
-    return () => {
-      clearTimeout(typingTimerRef.current);
-      emitTyping(false);
-    };
-  }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { clearTimeout(timerRef.current); emitTyping(false); };
+  }, [conversationId]);
 
-  function emitTyping(isTyping) {
-    const socket = getSocket();
-    if (!socket) return;
-    socket.emit("typing", { conversationId, isTyping });
+  function emitTyping(v) {
+    const s = getSocket(); if (!s) return;
+    s.emit("typing", { conversationId, isTyping: v });
   }
 
-  function handleTextChange(e) {
+  function handleChange(e) {
     setText(e.target.value);
-
-    // Emit typing start once per burst
-    if (!isTypingRef.current) {
-      isTypingRef.current = true;
-      emitTyping(true);
-    }
-
-    // Reset the debounce timer
-    clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => {
-      isTypingRef.current = false;
-      emitTyping(false);
-    }, TYPING_DEBOUNCE_MS);
+    // Auto-resize textarea
+    const ta = textareaRef.current;
+    if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; }
+    // Typing indicator
+    if (!isTypingRef.current) { isTypingRef.current = true; emitTyping(true); }
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { isTypingRef.current = false; emitTyping(false); }, 1000);
   }
 
   const send = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
-
-    // Clear typing indicator
-    clearTimeout(typingTimerRef.current);
-    isTypingRef.current = false;
-    emitTyping(false);
-
-    setSending(true);
-    setText("");
-
+    clearTimeout(timerRef.current); isTypingRef.current = false; emitTyping(false);
+    setSending(true); setText("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     try {
-      // POST to REST API — server returns the saved message with its real ID & timestamp
-      const res = await api.post("/messages", {
-        conversation_id: conversationId,
-        content: trimmed,
-      });
-
-      // Relay to the room via socket so OTHER users receive it in real time.
-      // We do NOT add it to our own list here — the REST response is the source of truth
-      // for the sender. The MessageList will add it to the sender's view through a
-      // mechanism: on successful POST, we emit to the room and the sender's MessageList
-      // handles the receive_message event which comes from socket.to() (others only).
-      // So we manually append it to the sender's local state via a custom event.
+      const res = await api.post("/messages", { conversation_id: conversationId, content: trimmed });
       const socket = getSocket();
-      if (socket) {
-        socket.emit("send_message", res.data);
-      }
-
-      // Dispatch a local event so MessageList can append the sent message for the sender
-      window.dispatchEvent(
-        new CustomEvent("chatty:message_sent", { detail: res.data })
-      );
+      if (socket) socket.emit("send_message", res.data);
+      window.dispatchEvent(new CustomEvent("chatty:message_sent", { detail: res.data }));
     } catch (err) {
-      console.error("Failed to send message:", err);
-      // Restore text on failure so the user can retry
-      setText(trimmed);
-    } finally {
-      setSending(false);
-    }
-  }, [text, sending, conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+      console.error(err); setText(trimmed);
+    } finally { setSending(false); textareaRef.current?.focus(); }
+  }, [text, sending, conversationId]);
 
-  function handleKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
+  const hasText = text.trim().length > 0;
+
   return (
-    <div style={styles.container}>
-      <textarea
-        style={styles.input}
-        placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-        value={text}
-        onChange={handleTextChange}
-        onKeyDown={handleKeyDown}
-        rows={1}
-        disabled={sending}
-      />
+    <div style={s.bar}>
+      {/* Emoji button (cosmetic) */}
+      <button style={s.iconBtn}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+        </svg>
+      </button>
+
+      {/* Attach button (cosmetic) */}
+      <button style={s.iconBtn}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+
+      <div style={s.inputWrap}>
+        <textarea
+          ref={textareaRef}
+          style={s.textarea}
+          placeholder="Message"
+          value={text}
+          onChange={handleChange}
+          onKeyDown={handleKey}
+          rows={1}
+          disabled={sending}
+        />
+      </div>
+
       <button
-        style={{
-          ...styles.button,
-          opacity: !text.trim() || sending ? 0.5 : 1,
-          cursor: !text.trim() || sending ? "default" : "pointer",
-        }}
+        style={{ ...s.sendBtn, background: hasText ? "var(--accent)" : "var(--bg-active)", transform: hasText ? "scale(1)" : "scale(0.9)" }}
         onClick={send}
-        disabled={!text.trim() || sending}
+        disabled={!hasText || sending}
       >
-        {sending ? "…" : "➤"}
+        {hasText ? (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+            <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+          </svg>
+        ) : (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        )}
       </button>
     </div>
   );
 }
 
-const styles = {
-  container: {
-    display: "flex",
-    alignItems: "flex-end",
-    gap: 8,
-    padding: "10px 14px",
-    borderTop: "1px solid #e5e7eb",
-    background: "#fff",
-  },
-  input: {
-    flex: 1,
-    padding: "9px 12px",
-    fontSize: 14,
-    border: "1px solid #ddd",
-    borderRadius: 20,
-    resize: "none",
-    outline: "none",
-    fontFamily: "inherit",
-    lineHeight: 1.5,
-    maxHeight: 120,
-    overflowY: "auto",
-  },
-  button: {
-    width: 40,
-    height: 40,
-    borderRadius: "50%",
-    background: "#2563eb",
-    color: "#fff",
-    border: "none",
-    fontSize: 16,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    transition: "opacity 0.15s",
-  },
+const s = {
+  bar: { display:"flex", alignItems:"flex-end", gap:8, padding:"8px 12px", background:"var(--bg-header)", borderTop:"1px solid var(--border)", flexShrink:0 },
+  iconBtn: { width:40, height:40, borderRadius:"50%", background:"none", display:"flex", alignItems:"center", justifyContent:"center", color:"var(--text-secondary)", flexShrink:0 },
+  inputWrap: { flex:1, background:"var(--bg-input)", borderRadius:22, padding:"0 14px", display:"flex", alignItems:"center" },
+  textarea: { width:"100%", padding:"11px 0", fontSize:15, color:"var(--text-primary)", background:"transparent", resize:"none", lineHeight:1.5, maxHeight:120, overflowY:"auto" },
+  sendBtn: { width:42, height:42, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all .2s", border:"none" },
 };
