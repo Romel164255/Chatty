@@ -9,42 +9,34 @@ import { connectSocket, disconnectSocket } from "./services/socket";
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [phone, setPhone] = useState(null);
+  const [devOtp, setDevOtp] = useState(null); // only set in dev mode
   const [loading, setLoading] = useState(true);
   const [hasUsername, setHasUsername] = useState(false);
 
   useEffect(() => {
     async function checkUser() {
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
+      if (!token) { setLoading(false); return; }
       try {
         const res = await api.get("/auth/me");
-        if (res.data.username) {
-          setHasUsername(true);
-        }
+        if (res.data.username) setHasUsername(true);
       } catch {
-        // api interceptor handles 401 — other errors just clear token
         localStorage.removeItem("token");
         setToken(null);
       } finally {
         setLoading(false);
       }
     }
-
     checkUser();
   }, [token]);
 
-  // Connect socket when user is fully logged in; disconnect on logout
   useEffect(() => {
-    if (token && hasUsername) {
-      connectSocket();
-    }
-    return () => {
-      // cleanup runs when token or hasUsername changes (e.g. logout)
-    };
+    if (token && hasUsername) connectSocket();
   }, [token, hasUsername]);
+
+  function handleSetPhone(phoneValue, otp) {
+    setPhone(phoneValue);
+    setDevOtp(otp || null);
+  }
 
   function handleLogin(newToken) {
     localStorage.setItem("token", newToken);
@@ -57,21 +49,19 @@ export default function App() {
     setToken(null);
     setHasUsername(false);
     setPhone(null);
+    setDevOtp(null);
   }
 
   if (loading) return <div style={{ padding: 40 }}>Loading…</div>;
 
-  if (!token && !phone) {
-    return <Login setPhone={setPhone} />;
-  }
+  if (!token && !phone)
+    return <Login setPhone={handleSetPhone} />;
 
-  if (!token && phone) {
-    return <VerifyOTP phone={phone} onLogin={handleLogin} />;
-  }
+  if (!token && phone)
+    return <VerifyOTP phone={phone} devOtp={devOtp} onLogin={handleLogin} />;
 
-  if (!hasUsername) {
+  if (!hasUsername)
     return <SetUsername onDone={() => setHasUsername(true)} />;
-  }
 
   return <Chat onLogout={handleLogout} />;
 }
