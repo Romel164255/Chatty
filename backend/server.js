@@ -15,127 +15,108 @@ import groupRoutes from "./routes/groupRoutes.js";
 
 dotenv.config();
 
-/* =========================
-   App Setup
-========================= */
-
 const app = express();
+app.set("trust proxy", 1);
 const server = createServer(app);
-
 const PORT = process.env.PORT || 5000;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
-/* =========================
-   CORS
-========================= */
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// Hardcode your Vercel URL here so it ALWAYS works regardless of env vars
+const ALLOWED = [
+  "https://chatty-phi-ten.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:5174",
+];
+
+// Also accept whatever is in CLIENT_ORIGIN env var (in case URL changes)
+if (process.env.CLIENT_ORIGIN && !ALLOWED.includes(process.env.CLIENT_ORIGIN)) {
+  ALLOWED.push(process.env.CLIENT_ORIGIN);
+}
 
 const corsOptions = {
-  origin: CLIENT_ORIGIN,
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Render health checks)
+    if (!origin) return callback(null, true);
+    if (ALLOWED.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS blocked: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };
 
+app.options("*", cors(corsOptions)); // handle all preflight requests
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 
-/* =========================
-   Routes
-========================= */
-
+// ── Routes ────────────────────────────────────────────────────────────────────
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
 app.use("/conversations", conversationRoutes);
 app.use("/messages", messageRoutes);
 app.use("/groups", groupRoutes);
 
-/* 404 catch-all */
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
-/* =========================
-   Socket.IO
-========================= */
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const io = new Server(server, {
+  cors: corsOptions,
+  transports: ["polling", "websocket"],
+});
 
-const io = new Server(server, { cors: corsOptions });
-
-// Authenticate every socket connection with a JWT
 io.use(socketAuthMiddleware);
 
-/* Online users: userId → Set<socketId> (supports multiple tabs) */
-const onlineUsers = new Map(); // userId → Set<socketId>
+const onlineUsers = new Map();
 
 function addOnline(userId, socketId) {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socketId);
 }
-
 function removeOnline(userId, socketId) {
   const sockets = onlineUsers.get(userId);
   if (!sockets) return;
   sockets.delete(socketId);
   if (sockets.size === 0) onlineUsers.delete(userId);
 }
-
 function broadcastOnlineUsers() {
   io.emit("online_users", Array.from(onlineUsers.keys()));
 }
 
-/* =========================
-   Socket Events
-========================= */
-
 io.on("connection", (socket) => {
-  const userId = socket.user.id; // guaranteed by socketAuthMiddleware
-
+  const userId = socket.user.id;
   console.log(`[socket] connected: ${socket.id} (user ${userId})`);
-
   addOnline(userId, socket.id);
   broadcastOnlineUsers();
 
-  /* JOIN CONVERSATION ROOM */
   socket.on("join_conversation", (conversationId) => {
     if (typeof conversationId !== "string") return;
     socket.join(conversationId);
   });
 
-  /* LEAVE CONVERSATION ROOM */
   socket.on("leave_conversation", (conversationId) => {
     socket.leave(conversationId);
   });
 
-  /* SEND MESSAGE (real-time relay only — storage happens via REST POST /messages) */
   socket.on("send_message", (data) => {
     if (!data || typeof data.conversation_id !== "string") return;
-
-    // Attach the authenticated sender ID — never trust the client-sent sender_id
-    const message = { ...data, sender_id: userId };
-
-    // Emit to everyone in the room EXCEPT the sender (sender already has it optimistically)
-    socket.to(data.conversation_id).emit("receive_message", message);
+    socket.to(data.conversation_id).emit("receive_message", { ...data, sender_id: userId });
   });
 
-  /* MESSAGE DELIVERED */
   socket.on("message_delivered", ({ message_id, conversationId }) => {
     if (!message_id || !conversationId) return;
     io.to(conversationId).emit("message_delivered", { message_id });
   });
 
-  /* MESSAGE READ */
   socket.on("message_read", ({ message_id, conversationId }) => {
     if (!message_id || !conversationId) return;
     io.to(conversationId).emit("message_read", { message_id });
   });
 
-  /* TYPING INDICATOR */
   socket.on("typing", ({ conversationId, isTyping }) => {
     if (!conversationId) return;
-    socket.to(conversationId).emit("user_typing", {
-      conversationId,
-      userId,
-      isTyping: Boolean(isTyping),
-    });
+    socket.to(conversationId).emit("user_typing", { conversationId, userId, isTyping: Boolean(isTyping) });
   });
 
-  /* DISCONNECT */
   socket.on("disconnect", () => {
     console.log(`[socket] disconnected: ${socket.id} (user ${userId})`);
     removeOnline(userId, socket.id);
@@ -143,10 +124,7 @@ io.on("connection", (socket) => {
   });
 });
 
-/* =========================
-   Database Test
-========================= */
-
+// ── Start ─────────────────────────────────────────────────────────────────────
 async function testDB() {
   try {
     const res = await pool.query("SELECT NOW()");
@@ -156,10 +134,6 @@ async function testDB() {
     process.exit(1);
   }
 }
-
-/* =========================
-   Start Server
-========================= */
 
 server.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
