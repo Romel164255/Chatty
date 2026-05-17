@@ -171,6 +171,15 @@ io.on("connection", (socket) => {
     io.to(conversationId).emit("message_read", { message_id });
   });
 
+  /* — Message delete broadcast — */
+  socket.on("delete_message", ({ message_id, conversation_id }) => {
+    if (!message_id || !conversation_id) return;
+    // Broadcast to everyone in the room (including sender's other tabs)
+    io.to(conversation_id).emit("message_deleted", { message_id });
+  });
+
+
+
   /* — Typing indicators (debounced on server) — */
   const typingTimers = new Map();
 

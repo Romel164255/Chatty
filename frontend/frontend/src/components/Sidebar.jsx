@@ -113,9 +113,16 @@ export default function Sidebar({ activeConversationId, onSelect, onLogout }) {
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={s.logoWrap}>
-            <span style={s.logoText}>rChat</span>
-            <div style={s.logoDot} />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <rect x="3" y="11" width="18" height="11" rx="2" fill="var(--accent)" opacity="0.9"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round"/>
+              <circle cx="12" cy="16" r="1.5" fill="white"/>
+            </svg>
+            <span style={s.logoText}>Cyphr</span>
           </div>
+          <span style={s.e2eBadge}>
+            🔒 End-to-End Encrypted
+          </span>
         </div>
         <div style={s.headerRight}>
           <Avatar name={me?.display_name || me?.username || "Me"} size={32} />
@@ -257,18 +264,18 @@ const s = {
     borderBottom: "1px solid var(--border)",
     flexShrink: 0,
   },
-  logoWrap: { display: "flex", alignItems: "center", gap: 6, position: "relative" },
+  logoWrap: { display: "flex", alignItems: "center", gap: 7, position: "relative" },
   logoText: {
     fontFamily: "var(--font-display)",
     fontSize: 20, fontWeight: 800,
-    background: "linear-gradient(135deg, #4dd8ff 0%, #a78bfa 100%)",
+    background: "linear-gradient(135deg, #3a76f0 0%, #4fc3c8 100%)",
     WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
     letterSpacing: "-0.5px",
   },
-  logoDot: {
-    width: 6, height: 6, borderRadius: "50%",
-    background: "var(--accent)", marginTop: -8,
-    boxShadow: "0 0 6px var(--accent-glow)",
+  e2eBadge: {
+    fontSize: 10, color: "var(--text-muted)",
+    letterSpacing: "0.02em", marginTop: 1,
+    display: "block",
   },
   headerRight: { display: "flex", alignItems: "center", gap: 2 },
   iconBtn: {

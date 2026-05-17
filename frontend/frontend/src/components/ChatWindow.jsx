@@ -92,9 +92,15 @@ export default function ChatWindow({ conversationId, title, isGroup }) {
         <div style={s.headerInfo}>
           <div style={s.headerName}>{title}</div>
           <div style={s.headerStatus}>
+            {/* E2E encryption badge */}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <rect x="3" y="11" width="18" height="11" rx="2" fill="var(--accent)" opacity="0.8"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" opacity="0.8"/>
+            </svg>
+            <span style={{ color: "var(--accent)", fontSize: 11, fontWeight: 500 }}>End-to-end encrypted</span>
             {isOnline && <span style={s.dot} />}
             <span style={{ color: typingUsers.length > 0 ? "var(--accent)" : "var(--text-secondary)" }}>
-              {statusLine}
+              {typingUsers.length > 0 && statusLine}
             </span>
           </div>
         </div>
