@@ -1,279 +1,162 @@
-import { useState,useRef,useEffect,useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import EmojiPicker from "emoji-picker-react";
-
 import api from "../services/api";
 import { getSocket } from "../services/socket";
+import { encryptMessage } from "../utils/crypto";
 
-import {
-encryptMessage
-}
-from "../utils/crypto";
+export default function MessageInput({ conversationId }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const textareaRef = useRef();
 
-const stickerPack=[
+  async function sendEncrypted(content) {
+    try {
+      // conversationId is passed so the same deterministic key is derived on
+      // every encrypt AND decrypt call — messages now decode correctly.
+      const encrypted = await encryptMessage(content, conversationId);
 
-"/stickers/laugh.png",
-"/stickers/wow.png",
-"/stickers/heart.png",
-"/stickers/thumbsup.png"
+      const res = await api.post("/messages", {
+        conversation_id: conversationId,
+        content: encrypted.ciphertext,
+        iv: encrypted.iv,
+      });
 
-];
+      const socket = getSocket();
+      if (socket) socket.emit("send_message", res.data);
 
-export default function MessageInput({
+      window.dispatchEvent(
+        new CustomEvent("chatty:message_sent", { detail: res.data })
+      );
+    } catch (err) {
+      console.error("Encryption error:", err);
+    }
+  }
 
-conversationId
+  const send = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
 
-}){
+    setSending(true);
+    setText("");
 
-const [text,setText]=useState("");
-const [sending,setSending]=useState(false);
+    try {
+      await sendEncrypted(trimmed);
+    } catch {
+      setText(trimmed);
+    } finally {
+      setSending(false);
+    }
+  }, [text, sending, conversationId]);
 
-const [showEmoji,setShowEmoji]=
-useState(false);
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
 
-const textareaRef=useRef();
+  function addEmoji(e) {
+    setText(prev => prev + e.emoji);
+    textareaRef.current?.focus();
+  }
 
-async function sendEncrypted(content){
+  return (
+    <>
+      {showEmoji && (
+        <div style={s.popup}>
+          <EmojiPicker onEmojiClick={addEmoji} theme="dark" />
+        </div>
+      )}
 
-try{
+      <div style={s.bar}>
+        <button
+          style={s.emojiBtn}
+          onClick={() => setShowEmoji(v => !v)}
+          title="Emoji"
+        >
+          😀
+        </button>
 
-const encrypted=
-await encryptMessage(content);
+        <textarea
+          ref={textareaRef}
+          style={s.textarea}
+          value={text}
+          rows={1}
+          placeholder="Message"
+          onChange={e => setText(e.target.value)}
+          onKeyDown={handleKey}
+        />
 
-const res=
-await api.post(
-"/messages",
-{
-
-conversation_id:
-conversationId,
-
-content:
-encrypted.ciphertext,
-
-iv:
-encrypted.iv
-
-}
-);
-
-const socket=
-getSocket();
-
-if(socket){
-
-socket.emit(
-"send_message",
-res.data
-);
-
-}
-
-window.dispatchEvent(
-
-new CustomEvent(
-
-"chatty:message_sent",
-{
-
-detail:res.data
-
-}
-
-)
-
-);
-
-}catch(err){
-
-console.error(
-"Encryption error:",
-err
-);
-
-}
-
-}
-
-const send=
-useCallback(async()=>{
-
-const trimmed=
-text.trim();
-
-if(
-!trimmed ||
-sending
-)return;
-
-setSending(true);
-
-setText("");
-
-try{
-
-await sendEncrypted(
-trimmed
-);
-
-}
-catch(err){
-
-setText(trimmed);
-
-}
-finally{
-
-setSending(false);
-
+        <button
+          style={{ ...s.sendBtn, opacity: sending || !text.trim() ? 0.45 : 1 }}
+          onClick={send}
+          disabled={sending || !text.trim()}
+          title="Send"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"
+            strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
 }
 
-},[
-text,
-sending,
-conversationId
-]);
-
-function handleKey(e){
-
-if(
-e.key==="Enter"
-&&
-!e.shiftKey
-){
-
-e.preventDefault();
-
-send();
-
-}
-
-}
-
-function addEmoji(e){
-
-setText(
-
-prev=>
-
-prev+
-e.emoji
-
-);
-
-}
-
-async function sendSticker(url){
-
-await sendEncrypted(url);
-
-setShowEmoji(false);
-
-}
-
-return(
-
-<>
-
-{showEmoji && (
-
-<div style={s.popup}>
-
-<EmojiPicker
-onEmojiClick={addEmoji}
-/>
-
-</div>
-
-)}
-
-<div style={s.bar}>
-
-<textarea
-
-ref={textareaRef}
-
-style={s.textarea}
-
-value={text}
-
-placeholder=
-"Encrypted message"
-
-onChange={
-
-e=>
-
-setText(
-e.target.value
-)
-
-}
-
-onKeyDown=
-{handleKey}
-
-/>
-
-<button
-
-onClick={()=>
-
-setShowEmoji(
-
-!showEmoji
-
-)
-
-}
-
->
-
-😀
-
-</button>
-
-<button
-
-onClick={send}
-
-disabled={sending}
-
->
-
-➤
-
-</button>
-
-</div>
-
-</>
-
-);
-
-}
-
-const s={
-
-bar:{
-
-display:"flex",
-gap:10,
-padding:10
-
-},
-
-textarea:{
-
-flex:1,
-resize:"none"
-
-},
-
-popup:{
-
-position:"absolute",
-bottom:70
-
-}
-
+const s = {
+  bar: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 8,
+    padding: "10px 14px",
+    background: "var(--bg-header)",
+    borderTop: "1px solid var(--border)",
+    flexShrink: 0,
+  },
+  textarea: {
+    flex: 1,
+    resize: "none",
+    background: "var(--bg-input)",
+    color: "var(--text-primary)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-md)",
+    padding: "10px 14px",
+    fontSize: 14,
+    lineHeight: 1.5,
+    maxHeight: 120,
+    overflowY: "auto",
+    fontFamily: "var(--font)",
+    transition: "border-color .15s, background .15s",
+  },
+  emojiBtn: {
+    background: "none",
+    fontSize: 20,
+    padding: "6px",
+    borderRadius: "50%",
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    transition: "background .15s",
+    lineHeight: 1,
+  },
+  sendBtn: {
+    background: "var(--accent)",
+    color: "var(--bg-app)",
+    width: 38,
+    height: 38,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    transition: "opacity .15s, background .15s",
+  },
+  popup: {
+    position: "absolute",
+    bottom: 70,
+    left: 14,
+    zIndex: 100,
+  },
 };
