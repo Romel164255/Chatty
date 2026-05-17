@@ -26,7 +26,7 @@ export default function MessageInput({ conversationId }) {
       if (socket) socket.emit("send_message", res.data);
 
       window.dispatchEvent(
-        new CustomEvent("chatty:message_sent", { detail: res.data })
+        new CustomEvent("chatty:message_sent", { detail: { plaintext: content, data: res.data } })
       );
     } catch (err) {
       console.error("Encryption error:", err);

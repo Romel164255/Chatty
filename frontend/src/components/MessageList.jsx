@@ -13,13 +13,11 @@ function getMyId() {
 
 /** Render a single message bubble's content */
 function MessageContent({ content }) {
-  // Audio messages are stored as "audio:<cloudinary-url>"
   if (typeof content === "string" && content.startsWith("audio:")) {
-    const url = content.slice(6);
     return (
       <audio
         controls
-        src={url}
+        src={content.slice(6)}
         style={{ maxWidth: "100%", minWidth: 220, outline: "none" }}
       />
     );
@@ -27,47 +25,64 @@ function MessageContent({ content }) {
   return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</span>;
 }
 
+/**
+ * Try to decrypt a single DB message row.
+ * - No iv   → plaintext row (audio or legacy), returned as-is.
+ * - iv set  → AES-GCM decrypt using PBKDF2-derived key for conversationId.
+ * - Decrypt failure → "🔒 Encrypted message" (old data encrypted with
+ *   a random throwaway key before this fix; those cannot be recovered).
+ */
+async function tryDecrypt(msg, conversationId) {
+  if (!msg.iv) return msg; // audio / unencrypted legacy row
+  try {
+    // conversationId is passed directly here — no stale-closure risk
+    const content = await decryptMessage(msg.content, msg.iv, String(conversationId));
+    return { ...msg, content };
+  } catch {
+    return { ...msg, content: "🔒 Encrypted message" };
+  }
+}
+
 export default function MessageList({ conversationId }) {
   const [messages, setMessages] = useState([]);
   const myId = getMyId();
   const bottomRef = useRef();
 
-  /**
-   * Decrypt a list of raw DB message rows.
-   *
-   * Rows that have no `iv` (e.g. audio messages uploaded via /audio/upload)
-   * are stored as plaintext and are returned as-is.
-   * Rows whose decryption fails (e.g. messages from before encryption was
-   * added) show a lock indicator instead of crashing.
-   */
-  async function decryptMessages(list) {
-    return Promise.all(
-      list.map(async msg => {
-        // No iv → plaintext row (audio or legacy message)
-        if (!msg.iv) return msg;
-
-        try {
-          const content = await decryptMessage(msg.content, msg.iv, conversationId);
-          return { ...msg, content };
-        } catch {
-          return { ...msg, content: "🔒 Encrypted message" };
-        }
-      })
-    );
-  }
-
-  const load = useCallback(async () => {
+  // ── Load history from REST API ───────────────────────────────────────────
+  // conversationId is passed as an argument, not via closure, so there is
+  // no stale-closure risk regardless of React's memoisation behaviour.
+  const load = useCallback(async (convId) => {
     try {
-      const res = await api.get(`/messages/${conversationId}`);
-      const decrypted = await decryptMessages(res.data);
+      const res = await api.get(`/messages/${convId}`);
+      const decrypted = await Promise.all(
+        res.data.map(msg => tryDecrypt(msg, convId))
+      );
       setMessages(decrypted);
     } catch (err) {
-      console.error(err);
+      console.error("load messages:", err);
     }
-  }, [conversationId]);
+  }, []); // no deps needed — convId is passed as argument
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!conversationId) return;
+    setMessages([]); // clear previous conversation's messages immediately
+    load(conversationId);
+  }, [conversationId, load]);
 
+  // ── Own sent messages (sender does NOT get receive_message from socket) ──
+  // MessageInput dispatches this event after a successful API save so the
+  // sender sees their own plaintext message instantly without a reload.
+  useEffect(() => {
+    function onSent(e) {
+      const { plaintext, data } = e.detail;
+      // Merge the DB row but use the plaintext the user just typed
+      setMessages(prev => [...prev, { ...data, content: plaintext }]);
+    }
+    window.addEventListener("chatty:message_sent", onSent);
+    return () => window.removeEventListener("chatty:message_sent", onSent);
+  }, []); // deliberately no conversationId dep — event carries the right data
+
+  // ── Incoming messages from other users via socket ────────────────────────
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
@@ -75,35 +90,28 @@ export default function MessageList({ conversationId }) {
     socket.emit("join_conversation", conversationId);
 
     async function onMessage(data) {
-      if (data.conversation_id !== conversationId) return;
+      if (String(data.conversation_id) !== String(conversationId)) return;
 
-      if (data.iv) {
-        try {
-          data.content = await decryptMessage(data.content, data.iv, conversationId);
-        } catch {
-          data.content = "🔒 Encrypted";
-        }
-      }
-      // no iv → plaintext (audio), show as-is
-
-      setMessages(prev => [...prev, data]);
+      const decrypted = await tryDecrypt(data, conversationId);
+      setMessages(prev => [...prev, decrypted]);
     }
 
     socket.on("receive_message", onMessage);
     return () => socket.off("receive_message", onMessage);
   }, [conversationId]);
 
+  // ── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
     <div style={s.list}>
-      {messages.map(msg => {
+      {messages.map((msg, i) => {
         const isMine = msg.sender_id === myId;
         return (
           <div
-            key={msg.id}
+            key={msg.id ?? `tmp-${i}`}
             style={{
               display: "flex",
               justifyContent: isMine ? "flex-end" : "flex-start",
@@ -111,13 +119,10 @@ export default function MessageList({ conversationId }) {
             }}
           >
             <div style={{ ...s.bubble, ...(isMine ? s.bubbleMe : s.bubbleThem) }}>
-              {/* Sender name in group chats for other people's messages */}
               {!isMine && msg.sender_name && (
                 <div style={s.senderName}>{msg.sender_name}</div>
               )}
-
               <MessageContent content={msg.content} />
-
               <div style={s.timestamp}>
                 {new Date(msg.created_at).toLocaleTimeString([], {
                   hour: "2-digit",
@@ -146,17 +151,14 @@ const s = {
     margin: "3px 0",
     borderRadius: "var(--radius-bubble)",
     maxWidth: "70%",
-    // Explicit text color so it's never affected by stray browser defaults
     color: "var(--text-primary)",
     fontSize: 14,
     lineHeight: 1.5,
   },
-  // "My" bubbles — uses the theme gradient defined in index.css
   bubbleMe: {
     background: "var(--bg-bubble-me)",
     borderBottomRightRadius: 4,
   },
-  // "Their" bubbles
   bubbleThem: {
     background: "var(--bg-bubble-them)",
     borderBottomLeftRadius: 4,
