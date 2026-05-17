@@ -62,13 +62,15 @@ export default function ChatWindow({ conversationId, title, isGroup }) {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
           </div>
-          <h2 style={s.emptyTitle}>Welcome to Cyphr</h2>
+         <h2 style={s.emptyTitle}>Welcome to Cyphr</h2>
+        {/* 
           <p style={s.emptyText}>Select a conversation or search for someone to start chatting</p>
           <div style={s.emptyHints}>
             <div style={s.emptyHint}><span style={s.hintKey}>🔍</span> Search for users</div>
             <div style={s.emptyHint}><span style={s.hintKey}>👥</span> Create group chats</div>
             <div style={s.emptyHint}><span style={s.hintKey}>⚡</span> Real-time messages</div>
-          </div>
+          </div>  
+          */}
         </div>
         {/* Decorative background */}
         <div style={s.emptyBg} />
