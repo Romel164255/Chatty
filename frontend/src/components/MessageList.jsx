@@ -5,175 +5,539 @@ import { decryptMessage } from "../utils/crypto";
 
 function getMyId() {
   try {
-    return JSON.parse(atob(localStorage.getItem("token").split(".")[1])).id;
+    return JSON.parse(
+      atob(
+        localStorage
+          .getItem("token")
+          .split(".")[1]
+      )
+    ).id;
   } catch {
     return null;
   }
 }
 
-/** Render a single message bubble's content */
+/* ---------- Message Content ---------- */
+
 function MessageContent({ content }) {
-  if (typeof content === "string" && content.startsWith("audio:")) {
+
+  if (
+    typeof content === "string" &&
+    content.startsWith("audio:")
+  ) {
+
     return (
+
       <audio
         controls
         src={content.slice(6)}
-        style={{ maxWidth: "100%", minWidth: 220, outline: "none" }}
+        style={{
+          maxWidth:"100%",
+          minWidth:220,
+          outline:"none"
+        }}
       />
+
     );
+
   }
-  return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</span>;
-}
-
-/**
- * Try to decrypt a single DB message row.
- * - No iv   → plaintext row (audio or legacy), returned as-is.
- * - iv set  → AES-GCM decrypt using PBKDF2-derived key for conversationId.
- * - Decrypt failure → "🔒 Encrypted message" (old data encrypted with
- *   a random throwaway key before this fix; those cannot be recovered).
- */
-async function tryDecrypt(msg, conversationId) {
-  if (!msg.iv) return msg; // audio / unencrypted legacy row
-  try {
-    // conversationId is passed directly here — no stale-closure risk
-    const content = await decryptMessage(msg.content, msg.iv, String(conversationId));
-    return { ...msg, content };
-  } catch {
-    return { ...msg, content: "🔒 Encrypted message" };
-  }
-}
-
-export default function MessageList({ conversationId }) {
-  const [messages, setMessages] = useState([]);
-  const myId = getMyId();
-  const bottomRef = useRef();
-
-  // ── Load history from REST API ───────────────────────────────────────────
-  // conversationId is passed as an argument, not via closure, so there is
-  // no stale-closure risk regardless of React's memoisation behaviour.
-  const load = useCallback(async (convId) => {
-    try {
-      const res = await api.get(`/messages/${convId}`);
-      const decrypted = await Promise.all(
-        res.data.map(msg => tryDecrypt(msg, convId))
-      );
-      setMessages(decrypted);
-    } catch (err) {
-      console.error("load messages:", err);
-    }
-  }, []); // no deps needed — convId is passed as argument
-
-  useEffect(() => {
-    if (!conversationId) return;
-    setMessages([]); // clear previous conversation's messages immediately
-    load(conversationId);
-  }, [conversationId, load]);
-
-  // ── Own sent messages (sender does NOT get receive_message from socket) ──
-  // MessageInput dispatches this event after a successful API save so the
-  // sender sees their own plaintext message instantly without a reload.
-  useEffect(() => {
-    function onSent(e) {
-      const { plaintext, data } = e.detail;
-      // Merge the DB row but use the plaintext the user just typed
-      setMessages(prev => [...prev, { ...data, content: plaintext }]);
-    }
-    window.addEventListener("chatty:message_sent", onSent);
-    return () => window.removeEventListener("chatty:message_sent", onSent);
-  }, []); // deliberately no conversationId dep — event carries the right data
-
-  // ── Incoming messages from other users via socket ────────────────────────
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    socket.emit("join_conversation", conversationId);
-
-    async function onMessage(data) {
-      if (String(data.conversation_id) !== String(conversationId)) return;
-
-      const decrypted = await tryDecrypt(data, conversationId);
-      setMessages(prev => [...prev, decrypted]);
-    }
-
-    socket.on("receive_message", onMessage);
-    return () => socket.off("receive_message", onMessage);
-  }, [conversationId]);
-
-  // ── Auto-scroll ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   return (
-    <div style={s.list}>
-      {messages.map((msg, i) => {
-        const isMine = msg.sender_id === myId;
-        return (
-          <div
-            key={msg.id ?? `tmp-${i}`}
-            style={{
-              display: "flex",
-              justifyContent: isMine ? "flex-end" : "flex-start",
-              marginBottom: 2,
-            }}
-          >
-            <div style={{ ...s.bubble, ...(isMine ? s.bubbleMe : s.bubbleThem) }}>
-              {!isMine && msg.sender_name && (
-                <div style={s.senderName}>{msg.sender_name}</div>
-              )}
-              <MessageContent content={msg.content} />
-              <div style={s.timestamp}>
-                {new Date(msg.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-      <div ref={bottomRef} />
-    </div>
+
+    <span
+      style={{
+        whiteSpace:"pre-wrap",
+        wordBreak:"break-word"
+      }}
+    >
+
+      {content}
+
+    </span>
+
   );
+
 }
 
-const s = {
-  list: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "12px 16px",
-    display: "flex",
-    flexDirection: "column",
-  },
-  bubble: {
-    padding: "9px 13px",
-    margin: "3px 0",
-    borderRadius: "var(--radius-bubble)",
-    maxWidth: "70%",
-    color: "var(--text-primary)",
-    fontSize: 14,
-    lineHeight: 1.5,
-  },
-  bubbleMe: {
-    background: "var(--bg-bubble-me)",
-    borderBottomRightRadius: 4,
-  },
-  bubbleThem: {
-    background: "var(--bg-bubble-them)",
-    borderBottomLeftRadius: 4,
-  },
-  senderName: {
-    fontSize: 11.5,
-    fontWeight: 600,
-    color: "var(--accent2)",
-    marginBottom: 3,
-  },
-  timestamp: {
-    fontSize: 10,
-    opacity: 0.55,
-    textAlign: "right",
-    marginTop: 4,
-    color: "var(--text-primary)",
-  },
+/* ---------- Decrypt helper ---------- */
+
+async function tryDecrypt(
+  msg,
+  conversationId
+){
+
+  // legacy or audio messages
+  if(!msg.iv){
+    return msg;
+  }
+
+  try{
+
+    const actualConversationId=
+
+    String(
+
+      msg.conversation_id ||
+
+      msg.conversationId ||
+
+      conversationId
+
+    );
+
+    const decrypted=
+
+    await decryptMessage(
+
+      msg.content,
+      msg.iv,
+      actualConversationId
+
+    );
+
+    return{
+
+      ...msg,
+
+      content:decrypted
+
+    };
+
+  }
+  catch(err){
+
+    console.error(
+      "decrypt error",
+      err,
+      msg
+    );
+
+    return{
+
+      ...msg,
+
+      content:
+      "[Failed to decrypt]"
+
+    };
+
+  }
+
+}
+
+export default function MessageList({
+
+conversationId
+
+}){
+
+const[
+messages,
+setMessages
+]=useState([]);
+
+const myId=
+getMyId();
+
+const bottomRef=
+useRef();
+
+
+/* ---------- Load history ---------- */
+
+const load=
+
+useCallback(
+
+async(
+convId
+)=>{
+
+try{
+
+const res=
+
+await api.get(
+`/messages/${convId}`
+);
+
+const decrypted=
+
+await Promise.all(
+
+res.data.map(
+
+msg=>
+
+tryDecrypt(
+msg,
+convId
+)
+
+)
+
+);
+
+setMessages(
+decrypted
+);
+
+}
+catch(err){
+
+console.error(
+"load messages",
+err
+);
+
+}
+
+},
+[]
+
+);
+
+
+/* ---------- Change conversation ---------- */
+
+useEffect(()=>{
+
+if(
+!conversationId
+)return;
+
+setMessages([]);
+
+load(
+conversationId
+);
+
+},
+[
+conversationId,
+load
+]);
+
+
+/* ---------- Own sent ---------- */
+
+useEffect(()=>{
+
+function onSent(e){
+
+const{
+plaintext,
+data
+}=e.detail;
+
+setMessages(
+
+prev=>
+
+[
+
+...prev,
+
+{
+
+...data,
+
+content:
+plaintext
+
+}
+
+]
+
+);
+
+}
+
+window.addEventListener(
+
+"chatty:message_sent",
+
+onSent
+
+);
+
+return()=>{
+
+window.removeEventListener(
+
+"chatty:message_sent",
+
+onSent
+
+);
+
+};
+
+},[]);
+
+
+/* ---------- Socket messages ---------- */
+
+useEffect(()=>{
+
+const socket=
+getSocket();
+
+if(
+!socket
+)return;
+
+socket.emit(
+"join_conversation",
+conversationId
+);
+
+async function onMessage(data){
+
+if(
+
+String(
+data.conversation_id
+)
+
+!==
+
+String(
+conversationId
+)
+
+)
+
+return;
+
+const decrypted=
+
+await tryDecrypt(
+
+data,
+conversationId
+
+);
+
+setMessages(
+
+prev=>
+
+[
+
+...prev,
+
+decrypted
+
+]
+
+);
+
+}
+
+socket.on(
+"receive_message",
+onMessage
+);
+
+return()=>{
+
+socket.off(
+"receive_message",
+onMessage
+);
+
+};
+
+},
+[
+conversationId
+]);
+
+
+/* ---------- Scroll ---------- */
+
+useEffect(()=>{
+
+bottomRef.current
+?.scrollIntoView({
+
+behavior:"smooth"
+
+});
+
+},
+[
+messages
+]);
+
+
+/* ---------- UI ---------- */
+
+return(
+
+<div style={s.list}>
+
+{
+
+messages.map(
+
+(msg,i)=>{
+
+const isMine=
+
+msg.sender_id===myId;
+
+return(
+
+<div
+
+key={
+msg.id ??
+`tmp-${i}`
+}
+
+style={{
+
+display:"flex",
+
+justifyContent:
+
+isMine
+?
+"flex-end"
+:
+"flex-start",
+
+marginBottom:4
+
+}}
+
+>
+
+<div
+
+style={{
+
+...s.bubble,
+
+...(isMine
+?
+s.bubbleMe
+:
+s.bubbleThem)
+
+}}
+
+>
+
+{
+
+!isMine &&
+msg.sender_name &&
+
+<div style={s.senderName}>
+
+{msg.sender_name}
+
+</div>
+
+}
+
+<MessageContent
+content={
+msg.content
+}
+/>
+
+<div style={s.timestamp}>
+
+{
+
+new Date(
+msg.created_at
+)
+
+.toLocaleTimeString(
+[],
+{
+hour:"2-digit",
+minute:"2-digit"
+}
+)
+
+}
+
+</div>
+
+</div>
+
+</div>
+
+);
+
+}
+
+)
+
+}
+
+<div ref={bottomRef}/>
+
+</div>
+
+);
+
+}
+
+const s={
+
+list:{
+flex:1,
+overflowY:"auto",
+padding:"12px 16px",
+display:"flex",
+flexDirection:"column"
+},
+
+bubble:{
+padding:"9px 13px",
+margin:"3px 0",
+borderRadius:
+"var(--radius-bubble)",
+maxWidth:"70%",
+color:
+"var(--text-primary)",
+fontSize:14,
+lineHeight:1.5
+},
+
+bubbleMe:{
+background:
+"var(--bg-bubble-me)",
+borderBottomRightRadius:4
+},
+
+bubbleThem:{
+background:
+"var(--bg-bubble-them)",
+borderBottomLeftRadius:4
+},
+
+senderName:{
+fontSize:11.5,
+fontWeight:600,
+color:"var(--accent2)",
+marginBottom:3
+},
+
+timestamp:{
+fontSize:10,
+opacity:.55,
+textAlign:"right",
+marginTop:4,
+color:
+"var(--text-primary)"
+}
+
 };
