@@ -113,7 +113,7 @@ export default function Sidebar({ activeConversationId, onSelect, onLogout }) {
       <div style={s.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={s.logoWrap}>
-            <span style={s.logoText}>rChat</span>
+            <span style={s.logoText}>Cyphr</span>
             <div style={s.logoDot} />
           </div>
         </div>

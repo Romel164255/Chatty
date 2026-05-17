@@ -39,7 +39,7 @@ export default function Login({ onConfirmation }) {
             <path d="M20 18h1.5l1.5 3.5-1 1.5c.8 1.5 2 2.7 3.5 3.5l1.5-1 3.5 1.5v1.5C30 29.33 28.33 31 26 30c-4-1.5-7.5-5-9-9C16 18.67 17.67 17 20 18z" fill="white" opacity="0.9"/>
           </svg>
         </div>
-        <h1 style={s.title}>rCHAT</h1>
+        <h1 style={s.title}>Cyphr</h1>
         <p style={s.subtitle}>Enter your phone number to continue</p>
         <div style={s.inputWrap}>
           <span style={s.icon}>📱</span>
